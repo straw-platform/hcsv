@@ -1,0 +1,53 @@
+cabal-version:   3.0
+name:            hcsv
+version:         0.1.0.0
+
+-- synopsis:
+-- description:
+license:         BSD-3-Clause
+license-file:    LICENSE
+author:          JacobX
+maintainer:      jacobbishopxy@gmail.com
+category:        Data
+build-type:      Simple
+extra-doc-files: CHANGELOG.md
+
+common warnings
+  ghc-options: -Wall
+
+library
+  import:           warnings
+  exposed-modules:  HCsv
+  other-modules:
+    HCsv.Adt
+    HCsv.Parser
+    HCsv.Util
+
+  build-depends:
+    , attoparsec
+    , base                  ^>=4.21.0.0
+    , bytestring
+    , containers
+    , text
+    , unordered-containers
+    , vector
+
+  hs-source-dirs:   src
+  default-language: GHC2024
+
+test-suite hcsv-test
+  import:           warnings
+  type:             exitcode-stdio-1.0
+  hs-source-dirs:   test
+  main-is:          Spec.hs
+  other-modules:    HCsvSpec
+  build-depends:
+    , base
+    , bytestring
+    , hcsv
+    , hspec
+    , hspec-discover
+    , temporary
+    , vector
+
+  default-language: GHC2024
