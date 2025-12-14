@@ -33,6 +33,11 @@ instance FromRecord Person where
     age' <- (fi, "age") ~> rec
     return $ Person name' age'
 
+instance ToRecord Person where
+  toNamedFields p =
+    [ ("name", toField (name p)),
+      ("age", toField (age p))
+    ]
 spec :: Spec
 spec = do
   describe "CSV Reading" $ do
@@ -94,3 +99,26 @@ spec = do
       let csvContent = "name,age\nJohn\nJane,25,Engineer"
       let parsed = AL.parseOnly csvWithHeader (BL.pack csvContent)
       parsed `shouldSatisfy` isLeft
+
+  describe "CSV Writing" $ do
+    it "should write and read CSV in a round trip" $ do
+      let persons = V.fromList [Person "John" 30, Person "Jane" 25]
+      withSystemTempFile "roundtrip.csv" $ \path handle -> do
+        hClose handle
+        res <- writeCsv path persons
+        res `shouldBe` Right ()
+        back <- readCsv path
+        back `shouldBe` Right persons
+
+    it "should escape commas and quotes when writing" $ do
+      let persons = V.fromList [Person "Smith, Jr." 40, Person "Ann \"Quote\"" 28]
+      withSystemTempFile "escape.csv" $ \path handle -> do
+        hClose handle
+        res <- writeCsv path persons
+        res `shouldBe` Right ()
+        back <- readCsv path
+        back `shouldBe` Right persons
+
+    it "should reject encoding empty inputs" $ do
+      let encoded = encodeCsv (V.empty :: V.Vector Person)
+      encoded `shouldSatisfy` isLeft
