@@ -30,7 +30,6 @@ import GHC.Float (double2Float)
 import HCsv.Adt
 import HCsv.Parser
 import HCsv.Util
-import System.IO
 
 
 ----------------------------------------------------------------------------------------------------
@@ -42,7 +41,7 @@ class FromRecord a where
   parseRecord :: FieldIndices -> Record -> Either String a
 
 class Parser a where
-  parse :: BS.ByteString -> a
+  parse :: BS.ByteString -> Either String a
 
 ----------------------------------------------------------------------------------------------------
 -- Private Fn
@@ -53,57 +52,58 @@ getFieldIndices :: Record -> HM.HashMap BS.ByteString Int
 getFieldIndices = V.ifoldl' (\acc i bs -> HM.insert bs i acc) HM.empty
 
 instance Parser String where
-  parse = T.unpack . TE.decodeUtf8Lenient
+  parse = Right . T.unpack . TE.decodeUtf8Lenient
 
 instance Parser (Maybe String) where
   parse s = case f s of
-    "" -> Nothing
-    s' -> Just s'
+    "" -> Right Nothing
+    s' -> Right (Just s')
     where
       f = T.unpack . TE.decodeUtf8Lenient
 
 instance Parser Int where
   parse s = case TR.decimal . TE.decodeUtf8Lenient $ s of
-    Right (i, r) | r == T.empty -> i
-    _ -> 0
+    Right (i, r) | r == T.empty -> Right i
+    _ -> Left "invalid Int"
 
 instance Parser (Maybe Int) where
   parse s = case TR.decimal . TE.decodeUtf8Lenient $ s of
-    Right (i, r) | r == T.empty -> Just i
-    _ -> Nothing
+    Right (i, r) | r == T.empty -> Right (Just i)
+    _ -> Right Nothing
 
 instance Parser Float where
   parse s = case TR.double . TE.decodeUtf8Lenient $ s of
-    Right (i, r) | r == T.empty -> double2Float i
-    _ -> 0
+    Right (i, r) | r == T.empty -> Right (double2Float i)
+    _ -> Left "invalid Float"
 
 instance Parser (Maybe Float) where
   parse s = case TR.double . TE.decodeUtf8Lenient $ s of
-    Right (i, r) | r == T.empty -> Just $ double2Float i
-    _ -> Nothing
+    Right (i, r) | r == T.empty -> Right (Just $ double2Float i)
+    _ -> Right Nothing
 
 instance Parser Double where
   parse s = case TR.double . TE.decodeUtf8Lenient $ s of
-    Right (i, r) | r == T.empty -> i
-    _ -> 0
+    Right (i, r) | r == T.empty -> Right i
+    _ -> Left "invalid Double"
 
 instance Parser (Maybe Double) where
   parse s = case TR.double . TE.decodeUtf8Lenient $ s of
-    Right (i, r) | r == T.empty -> Just i
-    _ -> Nothing
+    Right (i, r) | r == T.empty -> Right (Just i)
+    _ -> Right Nothing
 
 instance Parser Bool where
   parse s = case T.toLower $ f s of
-    "true" -> True
-    _ -> False
+    "true" -> Right True
+    "false" -> Right False
+    other -> Left $ "invalid Bool: " ++ T.unpack other
     where
       f = TE.decodeUtf8Lenient
 
 instance Parser (Maybe Bool) where
   parse s = case T.toLower $ f s of
-    "true" -> Just True
-    "false" -> Just False
-    _ -> Nothing
+    "true" -> Right (Just True)
+    "false" -> Right (Just False)
+    _ -> Right Nothing
     where
       f = TE.decodeUtf8Lenient
 
@@ -114,20 +114,18 @@ instance Parser (Maybe Bool) where
 (~>) :: (Parser a) => (HM.HashMap BS.ByteString Int, BS.ByteString) -> Record -> Either String a
 (~>) (fieldIndices, fld) vec = do
   idx <- maybe2Either "field not found" $ HM.lookup fld fieldIndices
-  return $ parse $ vec V.! idx
+  parse $ vec V.! idx
 
 (~>?) :: (Parser (Maybe a)) => (HM.HashMap BS.ByteString Int, BS.ByteString) -> Record -> Either String (Maybe a)
 (fieldIndices, fld) ~>? vec =
   case HM.lookup fld fieldIndices of
     Nothing -> Right Nothing
-    Just idx -> Right (parse (vec V.! idx))
+    Just idx -> parse (vec V.! idx)
 
 -- Define a function to parse a CSV file into a vector of vectors of ByteString
 readCsvRaw :: FilePath -> IO (Either String Csv)
 readCsvRaw f = do
-  h <- openFile f ReadMode
-  b <- BS.hGetContents h
-
+  b <- BS.readFile f
   return $ AL.parseOnly csv (BSL.fromStrict b)
 
 readCsv :: (FromRecord a) => FilePath -> IO (Either String (V.Vector a))
@@ -137,9 +135,11 @@ readCsv f = do
   case raw of
     Left err -> return $ Left err
     Right r -> do
-      let hd = V.head r
-          fi = getFieldIndices hd
-          records = V.tail r
-          res = traverse (parseRecord fi) records
-
-      return res
+      if V.null r
+        then return $ Left "empty CSV"
+        else do
+          let hd = V.head r
+              fi = getFieldIndices hd
+              records = V.tail r
+              res = traverse (parseRecord fi) records
+          return res

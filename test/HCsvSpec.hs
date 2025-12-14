@@ -7,22 +7,30 @@
 
 module HCsvSpec (spec) where
 
-import Test.Hspec
+import Control.Exception (SomeException, try)
+import Control.Monad (replicateM_)
+import qualified Data.Attoparsec.Lazy as AL
+import qualified Data.ByteString.Lazy.Char8 as BL
+import Data.Either (isLeft)
 import qualified Data.Vector as V
-import System.IO.Temp (withSystemTempFile)
-import System.IO (hPutStr, hClose)
 import HCsv
+import HCsv.Parser (csvWithHeader)
+import System.Directory (listDirectory)
+import System.IO (hClose, hPutStr)
+import System.IO.Temp (withSystemTempFile)
+import Test.Hspec
 
 -- Sample data type for testing
 data Person = Person
-  { name :: String
-  , age :: Int
-  } deriving (Show, Eq)
+  { name :: String,
+    age :: Int
+  }
+  deriving (Show, Eq)
 
 instance FromRecord Person where
   parseRecord fi rec = do
     name' <- (fi, "name") ~> rec
-    age'  <- (fi, "age")  ~> rec
+    age' <- (fi, "age") ~> rec
     return $ Person name' age'
 
 spec :: Spec
@@ -37,7 +45,7 @@ spec = do
         result <- readCsvRaw path
         case result of
           Right csv -> do
-            V.length csv `shouldBe` 3  -- header + 2 rows
+            V.length csv `shouldBe` 3 -- header + 2 rows
             (csv V.! 0) V.! 0 `shouldBe` "name"
             (csv V.! 1) V.! 1 `shouldBe` "30"
           Left err -> expectationFailure $ "Failed to parse CSV: " ++ err
@@ -54,3 +62,35 @@ spec = do
             V.length persons `shouldBe` 2
             persons `shouldBe` V.fromList [Person "John" 30, Person "Jane" 25]
           Left err -> expectationFailure $ "Failed to parse CSV: " ++ err
+
+    it "should return a parse error for empty CSV files" $ do
+      withSystemTempFile "empty.csv" $ \path handle -> do
+        hPutStr handle ""
+        hClose handle
+        outcome <- try (readCsv path) :: IO (Either SomeException (Either String (V.Vector Person)))
+        case outcome of
+          Right res -> res `shouldSatisfy` isLeft
+          Left _ -> expectationFailure "readCsv threw an exception instead of returning Left"
+
+    it "should close file handles after reading" $ do
+      let countFds = length <$> listDirectory "/proc/self/fd"
+      withSystemTempFile "handles.csv" $ \path handle -> do
+        hPutStr handle "name,age\nJohn,30\nJane,25"
+        hClose handle
+        fdBefore <- countFds
+        replicateM_ 50 $ readCsvRaw path
+        fdAfter <- countFds
+        (fdAfter - fdBefore) `shouldSatisfy` (<= 5)
+
+    it "should fail parsing when numeric fields are invalid" $ do
+      withSystemTempFile "invalid.csv" $ \path handle -> do
+        let csvContent = "name,age\nJohn,abc"
+        hPutStr handle csvContent
+        hClose handle
+        res <- readCsv path :: IO (Either String (V.Vector Person))
+        res `shouldSatisfy` isLeft
+
+    it "should reject rows that do not match header length" $ do
+      let csvContent = "name,age\nJohn\nJane,25,Engineer"
+      let parsed = AL.parseOnly csvWithHeader (BL.pack csvContent)
+      parsed `shouldSatisfy` isLeft

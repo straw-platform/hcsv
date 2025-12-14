@@ -72,9 +72,8 @@ sepByEndOfLine1' p = liftM2' (:) p loop
 csvWithHeader :: AL.Parser (Header, V.Vector NamedRecord)
 csvWithHeader = do
   !hdr <- header decDelimiter
-  vals <-
-    map (toNamedRecord hdr) . removeBlankLines
-      <$> sepByEndOfLine1' (record decDelimiter)
+  rawVals <- removeBlankLines <$> sepByEndOfLine1' (record decDelimiter)
+  vals <- traverse (namedRecordWithHeader hdr) rawVals
   _ <- optional endOfLine
   endOfInput
   let !v = V.fromList vals
@@ -88,6 +87,11 @@ header !delim = V.fromList <$!> name delim `sepByDelim1'` delim <* endOfLine
 -- 'field's.
 name :: Word8 -> AL.Parser Name
 name !delim = field delim
+
+namedRecordWithHeader :: Header -> Record -> AL.Parser NamedRecord
+namedRecordWithHeader hdr rec
+  | V.length hdr /= V.length rec = fail "row length does not match header"
+  | otherwise = return $ toNamedRecord hdr rec
 
 removeBlankLines :: [Record] -> [Record]
 removeBlankLines = filter (not . blankLine)

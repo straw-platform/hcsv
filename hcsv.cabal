@@ -1,6 +1,6 @@
 cabal-version:   3.0
 name:            hcsv
-version:         0.1.0.0
+version:         0.1.0.1
 
 -- synopsis:
 -- description:
@@ -39,15 +39,24 @@ test-suite hcsv-test
   import:           warnings
   type:             exitcode-stdio-1.0
   hs-source-dirs:   test
+                   , src
   main-is:          Spec.hs
   other-modules:    HCsvSpec
+                    HCsv
+                    HCsv.Adt
+                    HCsv.Parser
+                    HCsv.Util
   build-depends:
     , base
+    , attoparsec
     , bytestring
+    , directory
     , hcsv
     , hspec
     , hspec-discover
+    , text
     , temporary
+    , unordered-containers
     , vector
 
   default-language: GHC2024
