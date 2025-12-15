@@ -5,6 +5,14 @@
 -- date: 2025/09/18 13:32:03 Thursday
 -- brief:
 
+-- |
+-- Module: HCsv.Parser
+-- Description: Attoparsec-powered CSV parsers.
+--
+-- This module hosts the low level parsers that understand RFC4180-ish
+-- CSV syntax.  Most callers will rely on 'HCsv.readCsv', but exposing
+-- these pieces makes it possible to plug HCsv into custom pipelines
+-- without re-implementing the parsing details.
 module HCsv.Parser
   ( module HCsv.Parser,
   )
@@ -93,6 +101,8 @@ namedRecordWithHeader hdr rec
   | V.length hdr /= V.length rec = fail "row length does not match header"
   | otherwise = return $ toNamedRecord hdr rec
 
+-- | Drop records that contain a single empty field (our representation
+-- for blank lines in the source file).
 removeBlankLines :: [Record] -> [Record]
 removeBlankLines = filter (not . blankLine)
 
@@ -117,6 +127,8 @@ field !delim = do
     _ -> unescapedField delim
 {-# INLINE field #-}
 
+-- | Parse a double quoted field, un-escaping duplicated double quotes
+-- and stopping at the matching quote.
 escapedField :: AL.Parser S.ByteString
 escapedField = do
   _ <- dquote
@@ -140,6 +152,8 @@ escapedField = do
       Left err -> fail err
     else return s
 
+-- | Parse the \"fast path\" field that contains no delimiters or
+-- quotes and thus can be captured with a single takeWhile.
 unescapedField :: Word8 -> AL.Parser S.ByteString
 unescapedField !delim =
   A.takeWhile
@@ -149,9 +163,13 @@ unescapedField !delim =
           && c /= cr
     )
 
+-- | Double quote parser used by 'escapedField'.
 dquote :: AL.Parser Char
 dquote = char '"'
 
+-- | Unescape an escaped CSV field.  We use Zepto here instead of
+-- rolling this in Attoparsec to keep the logic separated from the
+-- streaming parser state.
 unescape :: Z.Parser S.ByteString
 unescape = (toStrict . toLazyByteString) <$!> go mempty
   where

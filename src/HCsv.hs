@@ -6,6 +6,14 @@
 -- date: 2025/09/18 14:00:03 Thursday
 -- brief:
 
+-- |
+-- Module: HCsv
+-- Description: Lightweight CSV reader/writer surface area.
+--
+-- The 'HCsv' module re-exports the public types, typeclasses, and helpers
+-- used across the rest of the package.  High level IO helpers such as
+-- 'readCsv' and 'writeCsv' live here together with the small parsing DSL
+-- ('Parser', 'FromRecord', 'ToRecord').
 module HCsv
   ( FromRecord (..),
     ToField (..),
@@ -43,16 +51,21 @@ import HCsv.Util
 -- Class
 ----------------------------------------------------------------------------------------------------
 
--- Typeclass for parsing a single record
+-- | Typeclass for turning a row into a Haskell value.  The provided
+-- 'FieldIndices' makes it possible to look up columns by header name
+-- without coupling to the physical column ordering.
 class FromRecord a where
   parseRecord :: FieldIndices -> Record -> Either String a
 
+-- | Parses a raw 'BS.ByteString' field into a more structured value.
 class Parser a where
   parse :: BS.ByteString -> Either String a
 
+-- | Typeclass for turning typed values back into textual CSV fields.
 class ToField a where
   toField :: a -> BS.ByteString
 
+-- | Typeclass for producing a named row that can be encoded into CSV.
 class (FromRecord a) => ToRecord a where
   toNamedFields :: a -> [(BS.ByteString, BS.ByteString)]
 
@@ -60,7 +73,9 @@ class (FromRecord a) => ToRecord a where
 -- Private Fn
 ----------------------------------------------------------------------------------------------------
 
--- Get indices for fields from the first record
+-- | Build a map from header names to their column indices.  This is
+-- evaluated once per CSV load and handed down to each 'FromRecord'
+-- instance so repeated lookups stay cheap.
 getFieldIndices :: Record -> HM.HashMap BS.ByteString Int
 getFieldIndices = V.ifoldl' (\acc i bs -> HM.insert bs i acc) HM.empty
 
@@ -146,6 +161,9 @@ toHeaderAndRecord :: [(BS.ByteString, BS.ByteString)] -> (Header, Record)
 toHeaderAndRecord pairs =
   (V.fromList $ fmap fst pairs, V.fromList $ fmap snd pairs)
 
+-- | Ensure the record produced by a 'ToRecord' instance still matches
+-- the original header ordering.  This guards against accidentally
+-- emitting mismatched shapes when encoding a vector of values.
 ensureRecordMatchesHeader :: Header -> [(BS.ByteString, BS.ByteString)] -> Either String Record
 ensureRecordMatchesHeader hdr pairs =
   let names = fmap fst pairs
@@ -153,6 +171,8 @@ ensureRecordMatchesHeader hdr pairs =
         then Right (V.fromList $ fmap snd pairs)
         else Left "record fields do not match header"
 
+-- | Escape a single field according to the RFC4180 rules used within
+-- this library (double quotes doubled, commas and newlines wrapped).
 escapeField :: BS.ByteString -> BS.ByteString
 escapeField bs
   | needsEscape = BS.concat ["\"", BS.concatMap escape bs, "\""]
@@ -171,6 +191,8 @@ renderRecord =
     . fmap (byteString . escapeField)
     . V.toList
 
+-- | Render a complete CSV document from a header and a collection of
+-- rows, separating each rendered line with @\\n@.
 renderCsv :: Header -> V.Vector Record -> BSL.ByteString
 renderCsv hdr records =
   let csvLines = renderRecord hdr : V.toList (renderRecord <$> records)
@@ -180,23 +202,33 @@ renderCsv hdr records =
 -- Public Fn
 ----------------------------------------------------------------------------------------------------
 
+-- | Lookup the named field in a record using cached indices and run
+-- the requested 'Parser'.  This operator is typically used within a
+-- 'FromRecord' instance, e.g. @(fi, \"age\") ~> record@.
 (~>) :: (Parser a) => (HM.HashMap BS.ByteString Int, BS.ByteString) -> Record -> Either String a
 (~>) (fieldIndices, fld) vec = do
   idx <- maybe2Either "field not found" $ HM.lookup fld fieldIndices
   parse $ vec V.! idx
 
+-- | Variant of '~>' that treats missing or empty fields as 'Nothing'
+-- rather than failing the whole parse.
 (~>?) :: (Parser (Maybe a)) => (HM.HashMap BS.ByteString Int, BS.ByteString) -> Record -> Either String (Maybe a)
 (fieldIndices, fld) ~>? vec =
   case HM.lookup fld fieldIndices of
     Nothing -> Right Nothing
     Just idx -> parse (vec V.! idx)
 
--- Define a function to parse a CSV file into a vector of vectors of ByteString
+-- | Read a CSV file off disk as-is without interpreting headers or
+-- converting the fields.  This is handy for debugging or tooling that
+-- wants a thin wrapper around Attoparsec's parser.
 readCsvRaw :: FilePath -> IO (Either String Csv)
 readCsvRaw f = do
   b <- BS.readFile f
   return $ AL.parseOnly csv (BSL.fromStrict b)
 
+-- | Parse a CSV file into a vector of domain values using the
+-- supplied 'FromRecord' instance.  Fails if the file is empty or the
+-- records cannot be parsed.
 readCsv :: (FromRecord a) => FilePath -> IO (Either String (V.Vector a))
 readCsv f = do
   raw <- readCsvRaw f
@@ -213,6 +245,8 @@ readCsv f = do
               res = traverse (parseRecord fi) records
           return res
 
+-- | Encode a vector of records into CSV bytes, making sure each
+-- subsequent row produces the same header layout as the first value.
 encodeCsv :: (ToRecord a) => V.Vector a -> Either String BSL.ByteString
 encodeCsv values
   | V.null values = Left "empty CSV data"
@@ -223,6 +257,8 @@ encodeCsv values
       let records = firstRecord `V.cons` restRecords
       return $ renderCsv hdr records
 
+-- | Write the provided records to disk, returning 'Left' on encoding
+-- errors instead of throwing.
 writeCsv :: (ToRecord a) => FilePath -> V.Vector a -> IO (Either String ())
 writeCsv f values =
   case encodeCsv values of

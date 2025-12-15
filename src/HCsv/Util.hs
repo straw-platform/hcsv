@@ -7,6 +7,13 @@
 -- date: 2025/09/18 13:34:26 Thursday
 -- brief:
 
+-- |
+-- Module: HCsv.Util
+-- Description: Shared helpers for the parser and encoder.
+--
+-- Most of the functions here are tiny combinators that keep the
+-- parsing modules tidy.  They are exposed so downstream callers can
+-- build small shims without copying code.
 module HCsv.Util
   ( module HCsv.Util,
   )
@@ -25,6 +32,8 @@ import qualified Data.Vector as V
 import Data.Word (Word8)
 import HCsv.Adt (Header, NamedRecord, Record)
 
+-- | Convert a lazy 'L.ByteString' into a strict one without going
+-- through intermediate 'String' conversions.
 toStrict :: L.ByteString -> B.ByteString
 toStrict = B.concat . L.toChunks
 
@@ -67,6 +76,8 @@ newline = 10
 cr = 13
 decDelimiter = 44 -- comma
 
+-- | Convert a 'Maybe' into an 'Either', using the provided error value
+-- when the 'Maybe' is 'Nothing'.
 maybe2Either :: e -> Maybe a -> Either e a
 maybe2Either e d = case d of
   Nothing -> Left e

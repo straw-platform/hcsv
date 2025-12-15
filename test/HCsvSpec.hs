@@ -38,6 +38,10 @@ instance ToRecord Person where
     [ ("name", toField (name p)),
       ("age", toField (age p))
     ]
+
+-- | Integration specs covering read/encode helpers.  Each example uses
+-- temporary files so the tests stay isolated and mirrors real IO
+-- usage.
 spec :: Spec
 spec = do
   describe "CSV Reading" $ do

@@ -3,6 +3,13 @@
 -- date: 2025/09/18 13:27:31 Thursday
 -- brief:
 
+-- |
+-- Module: HCsv.Adt
+-- Description: Shared aliases for rows, fields, and headers.
+--
+-- These aliases keep the surface API succinct and make type signatures
+-- easier to scan throughout the rest of the package.
+
 module HCsv.Adt
   ( module HCsv.Adt,
   )
@@ -34,4 +41,6 @@ type NamedRecord = HM.HashMap BS.ByteString BS.ByteString
 -- | A single field within a record.
 type Field = BS.ByteString
 
+-- | Cached mapping from header names to positional indices used while
+-- parsing records.
 type FieldIndices = HM.HashMap BS.ByteString Int
